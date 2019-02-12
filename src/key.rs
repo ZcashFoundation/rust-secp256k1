@@ -15,7 +15,8 @@
 
 //! # Public and secret keys
 
-#[cfg(any(test, feature = "rand"))] use rand::Rng;
+#[cfg(any(test, feature = "rand"))] use rand::RngCore;
+//#[cfg(any(test, feature = "rand_core"))] use rand_core::impls;
 
 use std::{fmt, mem, str};
 
@@ -90,7 +91,7 @@ impl str::FromStr for PublicKey {
 }
 
 #[cfg(any(test, feature = "rand"))]
-fn random_32_bytes<R: Rng>(rng: &mut R) -> [u8; 32] {
+fn random_32_bytes<R: RngCore>(rng: &mut R) -> [u8; 32] {
     let mut ret = [0u8; 32];
     rng.fill_bytes(&mut ret);
     ret
@@ -100,7 +101,7 @@ impl SecretKey {
     /// Creates a new random secret key. Requires compilation with the "rand" feature.
     #[inline]
     #[cfg(any(test, feature = "rand"))]
-    pub fn new<R: Rng>(rng: &mut R) -> SecretKey {
+    pub fn new<R: RngCore>(rng: &mut R) -> SecretKey {
         let mut data = random_32_bytes(rng);
         unsafe {
             while ffi::secp256k1_ec_seckey_verify(
@@ -393,7 +394,8 @@ mod test {
     use super::{PublicKey, SecretKey};
     use super::super::constants;
 
-    use rand::{Rng, thread_rng};
+    use rand::{RngCore, thread_rng, Error};
+    use rand_core::impls;
     use std::iter;
     use std::str::FromStr;
 
@@ -462,8 +464,9 @@ mod test {
     fn test_out_of_range() {
 
         struct BadRng(u8);
-        impl Rng for BadRng {
+        impl RngCore for BadRng {
             fn next_u32(&mut self) -> u32 { unimplemented!() }
+            fn next_u64(&mut self) -> u64 { unimplemented!() }
             // This will set a secret key to a little over the
             // group order, then decrement with repeated calls
             // until it returns a valid key
@@ -477,6 +480,9 @@ mod test {
                 data.copy_from_slice(&group_order[..]);
                 data[31] = self.0;
                 self.0 -= 1;
+            }
+            fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+                Ok(self.fill_bytes(dest))
             }
         }
 
@@ -518,18 +524,30 @@ mod test {
     #[test]
     fn test_debug_output() {
         struct DumbRng(u32);
-        impl Rng for DumbRng {
+        impl RngCore for DumbRng {
             fn next_u32(&mut self) -> u32 {
                 self.0 = self.0.wrapping_add(1);
                 self.0
+            }
+            fn next_u64(&mut self) -> u64 {
+                self.0 = self.0.wrapping_add(10);
+                self.0 as u64
+            }
+            fn fill_bytes(&mut self, data: &mut [u8]) {
+                impls::fill_bytes_via_next(self, data)
+            }
+            fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+                    Ok(self.fill_bytes(dest))
             }
         }
 
         let s = Secp256k1::new();
         let (sk, _) = s.generate_keypair(&mut DumbRng(0));
 
+        //assert_eq!(&format!("{:?}", sk),
+                   //"SecretKey(0200000001000000040000000300000006000000050000000800000007000000)");
         assert_eq!(&format!("{:?}", sk),
-                   "SecretKey(0200000001000000040000000300000006000000050000000800000007000000)");
+                   "SecretKey(0a0000000000000014000000000000001e000000000000002800000000000000)");
     }
 
     #[test]
@@ -588,19 +606,33 @@ mod test {
     #[test]
     fn test_pubkey_serialize() {
         struct DumbRng(u32);
-        impl Rng for DumbRng {
+        impl RngCore for DumbRng {
             fn next_u32(&mut self) -> u32 {
                 self.0 = self.0.wrapping_add(1);
                 self.0
+            }
+            fn next_u64(&mut self) -> u64 {
+                self.0 = self.0.wrapping_add(1);
+                self.0 as u64
+            }
+            fn fill_bytes(&mut self, data: &mut [u8]) {
+                impls::fill_bytes_via_next(self, data)
+            }
+            fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+                Ok(self.fill_bytes(dest))
             }
         }
 
         let s = Secp256k1::new();
         let (_, pk1) = s.generate_keypair(&mut DumbRng(0));
+        //assert_eq!(&pk1.serialize_uncompressed()[..],
+        //           &[4, 149, 16, 196, 140, 38, 92, 239, 179, 65, 59, 224, 230, 183, 91, 238, 240, 46, 186, 252, 175, 102, 52, 249, 98, 178, 123, 72, 50, 171, 196, 254, 236, 1, 189, 143, 242, 227, 16, 87, 247, 183, 162, 68, 237, 140, 92, 205, 151, 129, 166, 58, 111, 96, 123, 64, 180, 147, 51, 12, 209, 89, 236, 213, 206][..]);
+        //assert_eq!(&pk1.serialize()[..],
+        //           &[2, 149, 16, 196, 140, 38, 92, 239, 179, 65, 59, 224, 230, 183, 91, 238, 240, 46, 186, 252, 175, 102, 52, 249, 98, 178, 123, 72, 50, 171, 196, 254, 236][..]);
         assert_eq!(&pk1.serialize_uncompressed()[..],
-                   &[4, 149, 16, 196, 140, 38, 92, 239, 179, 65, 59, 224, 230, 183, 91, 238, 240, 46, 186, 252, 175, 102, 52, 249, 98, 178, 123, 72, 50, 171, 196, 254, 236, 1, 189, 143, 242, 227, 16, 87, 247, 183, 162, 68, 237, 140, 92, 205, 151, 129, 166, 58, 111, 96, 123, 64, 180, 147, 51, 12, 209, 89, 236, 213, 206][..]);
+                   &[4, 124, 121, 49, 14, 253, 63, 197, 50, 39, 194, 107, 17, 193, 219, 108, 154, 126, 9, 181, 248, 2, 12, 149, 233, 198, 71, 149, 134, 250, 184, 154, 229, 185, 28, 165, 110, 27, 3, 162, 126, 238, 167, 157, 242, 221, 76, 251, 237, 34, 231, 72, 39, 245, 3, 191, 64, 111, 170, 117, 103, 82, 28, 102, 163][..]);
         assert_eq!(&pk1.serialize()[..],
-                   &[2, 149, 16, 196, 140, 38, 92, 239, 179, 65, 59, 224, 230, 183, 91, 238, 240, 46, 186, 252, 175, 102, 52, 249, 98, 178, 123, 72, 50, 171, 196, 254, 236][..]);
+                   &[3, 124, 121, 49, 14, 253, 63, 197, 50, 39, 194, 107, 17, 193, 219, 108, 154, 126, 9, 181, 248, 2, 12, 149, 233, 198, 71, 149, 134, 250, 184, 154, 229][..]);
     }
 
     #[test]

@@ -136,11 +136,12 @@
 #![cfg_attr(all(test, feature = "unstable"), feature(test))]
 #[cfg(all(test, feature = "unstable"))] extern crate test;
 #[cfg(any(test, feature = "rand"))] pub extern crate rand;
+#[cfg(any(test, feature = "rand_core"))] extern crate rand_core;
 #[cfg(feature = "serde")] pub extern crate serde;
 #[cfg(all(test, feature = "serde"))] extern crate serde_test;
 
 use std::{error, fmt, ptr, str};
-#[cfg(any(test, feature = "rand"))] use rand::Rng;
+#[cfg(any(test, feature = "rand"))] use rand::RngCore;
 
 #[macro_use]
 mod macros;
@@ -636,7 +637,7 @@ impl<C> Secp256k1<C> {
     /// see comment in libsecp256k1 commit d2275795f by Gregory Maxwell. Requires
     /// compilation with "rand" feature.
     #[cfg(any(test, feature = "rand"))]
-    pub fn randomize<R: Rng>(&mut self, rng: &mut R) {
+    pub fn randomize<R: RngCore>(&mut self, rng: &mut R) {
         let mut seed = [0; 32];
         rng.fill_bytes(&mut seed);
         unsafe {
@@ -705,7 +706,7 @@ impl<C: Signing> Secp256k1<C> {
     /// with the "rand" feature.
     #[inline]
     #[cfg(any(test, feature = "rand"))]
-    pub fn generate_keypair<R: Rng>(&self, rng: &mut R)
+    pub fn generate_keypair<R: RngCore>(&self, rng: &mut R)
                                     -> (key::SecretKey, key::PublicKey) {
         let sk = key::SecretKey::new(rng);
         let pk = key::PublicKey::from_secret_key(self, &sk);
@@ -778,7 +779,7 @@ fn from_hex(hex: &str, target: &mut [u8]) -> Result<usize, ()> {
 
 #[cfg(test)]
 mod tests {
-    use rand::{Rng, thread_rng};
+    use rand::{RngCore, thread_rng};
     use std::str::FromStr;
 
     use key::{SecretKey, PublicKey};
